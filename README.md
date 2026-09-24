@@ -75,7 +75,7 @@ Run everything **as root on the mailcow host**.
 
 ```bash
 cd /tmp
-git clone https://github.com/YOUR-USER/mailcow-sogo-darkmode.git
+git clone https://github.com/Sub-7/mailcow-sogo-darkmode.git
 cd mailcow-sogo-darkmode
 sha256sum -c SHA256SUMS
 ```
@@ -275,4 +275,4 @@ The settings key in users' browsers (`sogoDarkModeSettings`) is harmless without
 
 MIT, see [LICENSE](LICENSE). Not affiliated with mailcow or Alinto (SOGo).
 
-Made by YOUR NAME with the help of an AI assistant (Claude by Anthropic). Tested on a production mailcow server.
+Made by Sub-7 with the help of an AI assistant (Claude by Anthropic). Tested on a production mailcow server.
