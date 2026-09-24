@@ -56,7 +56,7 @@ grep -nE "fetch|XMLHttpRequest|WebSocket|sendBeacon|eval\(|Function\(|cookie" cu
 ## Try it first, without touching the server
 
 1. Open SOGo in your browser, press **F12** and switch to **Console**.
-2. Firefox only: type `allow pasting` and press Enter.
+2. Firefox only: Firefox blocks pasting into the console the first time and asks you to type a phrase by hand. In English it's `allow pasting`, in other languages a translation (German: `Einfügen erlauben`).
 3. Paste the whole content of `custom-darkmode.js` and press Enter.
 
 The dark mode button appears in the toolbar. This only affects the current tab until you reload the page. Settings you change are kept in the browser. To remove them, run `localStorage.removeItem('sogoDarkModeSettings')` in the console.
