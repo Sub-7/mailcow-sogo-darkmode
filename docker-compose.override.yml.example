@@ -1,0 +1,15 @@
+# SOGo Dark Mode for mailcow
+#
+# No docker-compose.override.yml yet?
+#   Copy this file to /opt/mailcow-dockerized/docker-compose.override.yml
+#
+# Already have a docker-compose.override.yml?
+#   Do NOT replace it. Only add the "- ./data/conf/sogo/custom-darkmode.js:..." line
+#   under services -> sogo-mailcow -> volumes (create those keys if they don't exist yet).
+#
+# The target path must match the js/theme.js path in mailcow's docker-compose.yml:
+#   grep -n 'js/theme.js' /opt/mailcow-dockerized/docker-compose.yml
+services:
+  sogo-mailcow:
+    volumes:
+      - ./data/conf/sogo/custom-darkmode.js:/usr/local/lib/GNUstep/SOGo/WebServerResources/js/theme.js:z
