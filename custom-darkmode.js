@@ -1,7 +1,7 @@
 /*
  * SOGo Dark Mode for mailcow-dockerized
- * Version 1.0.0 – colors, header color, layout, draggable borders, text size per area
- * -----------------------------------------------------------------------------------
+ * Version 1.2.0 – colors, header color, layout, draggable borders, text size, unread highlighting
+ * -----------------------------------------------------------------------------------------------
  * File:   data/conf/sogo/custom-darkmode.js
  * Mounted as js/theme.js into the SOGo container via docker-compose.override.yml.
  * SOGo loads js/theme.js on every page (SOGoUIAdditionalJSFiles in sogo.conf).
@@ -10,7 +10,8 @@
  *   - Round button top right (left of Calendar/Address Book/Mail) opens the settings
  *   - Tab "Colors": dark mode, color sliders, header color, presets
  *   - Tab "Layout": folder pane / message list width, header / user area height
- *   - Tab "Text": text size for folder pane, message list, reading pane, header, user area
+ *   - Tab "Text": text size for folder pane, message list, reading pane, header, user area,
+ *     and how unread messages are highlighted in the message list
  *   - Borders between areas can be dragged with the mouse, double-click a border = default
  *   - Alt+Shift+D toggles dark mode on/off
  *   - Settings are stored per browser (localStorage), not per account
@@ -25,9 +26,13 @@
  * FALLBACK_POSITION below.
  *
  * License: MIT
+ * Project: https://github.com/Sub-7/mailcow-sogo-darkmode
  */
 (function () {
   'use strict';
+
+  var VERSION = '1.2.0';
+  var PROJECT_URL = 'https://github.com/Sub-7/mailcow-sogo-darkmode';
 
   // ---------- Server-wide defaults ----------
   var DEFAULTS = {
@@ -47,7 +52,12 @@
     fontList: 100,      // text size message list in %
     fontDetail: 100,    // text size reading pane in %
     fontHeader: 100,    // text size header (top right) in %
-    fontUser: 100       // text size user area (top left) in %
+    fontUser: 100,      // text size user area (top left) in %
+    unreadBold: true,   // unread messages: bold sender/subject/date
+    unreadBar: true,    // unread messages: color bar on the left
+    unreadBg: false,    // unread messages: tinted background
+    unreadText: false,  // unread messages: colored subject
+    unreadColor: '#2196f3' // color for bar/background/subject
   };
   var SHOW_BUTTON = true;   // false = no button, keyboard shortcut only
   var SHOW_HANDLES = true;  // false = no draggable borders
@@ -109,7 +119,13 @@
       hintLayout: 'Die Ränder lassen sich auch direkt mit der Maus ziehen, Doppelklick auf den Rand setzt zurück. ' +
         'Breiten gelten ab 1024 px Fensterbreite. Unter 112 px Höhe wird das Profilbild ausgeblendet.',
       hintFont: 'Vergrößert Schrift und Symbole im jeweiligen Bereich. Ordnerleiste und Mailliste lassen sich ' +
-        'nur vergrößern, kleiner würde SOGos Listenanzeige beim Scrollen Lücken lassen.'
+        'nur vergrößern, kleiner würde SOGos Listenanzeige beim Scrollen Lücken lassen.',
+      unreadTitle: 'Ungelesene Mails hervorheben',
+      unreadBold: 'Fett',
+      unreadBar: 'Farbbalken links',
+      unreadBg: 'Hintergrund einfärben',
+      unreadText: 'Betreff einfärben',
+      unreadColor: 'Farbe'
     },
     en: {
       title: 'Dark mode',
@@ -151,7 +167,13 @@
       hintLayout: 'You can also drag the borders directly with the mouse, double-click a border to reset. ' +
         'Widths apply from a window width of 1024 px. Below 112 px height the profile picture is hidden.',
       hintFont: 'Scales text and icons in each area. Folder pane and message list can only be enlarged, ' +
-        'smaller sizes would leave gaps in SOGo’s list while scrolling.'
+        'smaller sizes would leave gaps in SOGo’s list while scrolling.',
+      unreadTitle: 'Highlight unread messages',
+      unreadBold: 'Bold',
+      unreadBar: 'Color bar on the left',
+      unreadBg: 'Tinted background',
+      unreadText: 'Colored subject',
+      unreadColor: 'Color'
     }
   };
 
@@ -210,6 +232,9 @@
     { key: 'fontUser',    min: 70,  max: 160, selector: 'md-sidenav > md-toolbar.md-tall > *' }
   ];
 
+  // How unread messages are highlighted in the message list (on/off switches)
+  var UNREAD = ['unreadBold', 'unreadBar', 'unreadBg', 'unreadText'];
+
   var MODES = ['dark', 'auto', 'light'];
   var MODE_LABELS = { dark: 'modeDark', auto: 'modeAuto', light: 'modeLight' };
 
@@ -245,6 +270,10 @@
       out[r.key] = isFinite(v) ? clamp(Math.round(v), r.min, r.max) : DEFAULTS[r.key];
     });
     out.headerColor = /^#[0-9a-f]{6}$/i.test(String(s.headerColor || '')) ? String(s.headerColor).toLowerCase() : '';
+    UNREAD.forEach(function (k) {
+      out[k] = typeof s[k] === 'boolean' ? s[k] : DEFAULTS[k];
+    });
+    out.unreadColor = /^#[0-9a-f]{6}$/i.test(String(s.unreadColor || '')) ? String(s.unreadColor).toLowerCase() : DEFAULTS.unreadColor;
     if (s.lastDarkMode === 'dark' || s.lastDarkMode === 'auto') {
       out.lastDarkMode = s.lastDarkMode;
     } else {
@@ -577,8 +606,34 @@
     return out.join('\n');
   }
 
+  // Unread messages: SOGo sets the class "unread" on the list item and only uses a
+  // slightly heavier font, which is hard to spot. These rules make it stand out.
+  function unreadCss() {
+    var item = 'md-list-item.sg-message-list-item.unread';
+    var color = cssColorFor(settings.unreadColor);
+    var out = [];
+    if (settings.unreadBold) {
+      out.push([item + ' .sg-md-subhead', item + ' .sg-md-body', item + ' .sg-tile-date'].join(',\n') +
+        ' {\n  font-weight: 700 !important;\n}');
+    }
+    if (settings.unreadBar) {
+      out.push(item + ' {\n  box-shadow: inset 4px 0 0 ' + color + ' !important;\n}');
+    }
+    if (settings.unreadBg) {
+      var c = hexToRgb(color).map(function (v) {
+        return Math.round(v * 255);
+      });
+      // not on the selected message, SOGo marks that one with md-bg
+      out.push(item + ':not(.md-bg) {\n  background-color: rgba(' + c.join(', ') + ', 0.16) !important;\n}');
+    }
+    if (settings.unreadText) {
+      out.push(item + ' .sg-tile-subject {\n  color: ' + color + ' !important;\n}');
+    }
+    return out.join('\n');
+  }
+
   function pageCss() {
-    return [darkCss(), headerCss(), layoutCss(), fontCss()].filter(Boolean).join('\n');
+    return [darkCss(), headerCss(), layoutCss(), fontCss(), unreadCss()].filter(Boolean).join('\n');
   }
 
   // Inside the editor (own document in an iframe) invert images back
@@ -686,6 +741,7 @@
   var layoutSliders = {};
   var fontSliders = {};
   var colorUi = null;
+  var unreadUi = null;
   var tabButtons = {};
   var pages = {};
   var currentTab = 'colors';
@@ -743,7 +799,13 @@
     '.swatch .fill { position: absolute; inset: 0; }',
     '.swatch input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;',
     '  border: 0; padding: 0; }',
-    '.hint { margin-top: 8px; color: #757575; font-size: 11px; line-height: 1.4; }'
+    '.sect { margin: 14px 0 6px; padding-top: 10px; border-top: 1px solid #e0e0e0; font-weight: 600; }',
+    '.chk { display: flex; align-items: center; gap: 8px; margin: 5px 0; cursor: pointer; }',
+    '.chk input { margin: 0; accent-color: #1976d2; cursor: pointer; }',
+    '.hint { margin-top: 8px; color: #757575; font-size: 11px; line-height: 1.4; }',
+    '.foot { margin-top: 10px; text-align: center; color: #9e9e9e; font-size: 11px; }',
+    '.foot a { color: #1976d2; text-decoration: none; }',
+    '.foot a:hover { text-decoration: underline; }'
   ].join('\n');
 
   var ICON = '<svg viewBox="0 0 24 24" aria-hidden="true">' +
@@ -874,6 +936,13 @@
     colorUi.fill.style.background = cssColorFor(shown);
     colorUi.val.textContent = settings.headerColor ? settings.headerColor : t('standard');
     colorUi.reset.hidden = !settings.headerColor;
+    UNREAD.forEach(function (k) {
+      unreadUi.checks[k].checked = !!settings[k];
+    });
+    unreadUi.input.value = settings.unreadColor;
+    unreadUi.fill.style.background = cssColorFor(settings.unreadColor);
+    unreadUi.val.textContent = settings.unreadColor;
+    unreadUi.reset.hidden = settings.unreadColor === DEFAULTS.unreadColor;
   }
 
   function setHostMode(mode, corner) {
@@ -1022,7 +1091,7 @@
       '<div class="row color"><label><span class="name">' + esc(t('headerColor')) + '</span>' +
       '<span data-cval></span>' +
       '<button type="button" class="one" data-act="header-default" title="' + esc(t('resetOne')) + '">↺</button></label>' +
-      '<span class="swatch"><span class="fill"></span><input type="color" aria-label="' + esc(t('headerColor')) + '"></span>' +
+      '<span class="swatch" data-swatch="header"><span class="fill"></span><input type="color" aria-label="' + esc(t('headerColor')) + '"></span>' +
       '</div>' +
       '<div class="presets">' + presets + '</div>' +
       '<div class="actions"><button type="button" class="b" data-act="reset-colors">' + esc(t('reset')) + '</button></div>' +
@@ -1035,10 +1104,20 @@
       '</div>' +
       '<div class="page" data-page="font">' +
       fontRows +
+      '<div class="sect">' + esc(t('unreadTitle')) + '</div>' +
+      UNREAD.map(function (k) {
+        return '<label class="chk"><input type="checkbox" data-ukey="' + k + '">' + esc(t(k)) + '</label>';
+      }).join('') +
+      '<div class="row color"><label><span class="name">' + esc(t('unreadColor')) + '</span>' +
+      '<span data-ucval></span>' +
+      '<button type="button" class="one" data-act="unread-color-default" title="' + esc(t('resetOne')) + '">↺</button></label>' +
+      '<span class="swatch" data-swatch="unread"><span class="fill"></span><input type="color" aria-label="' + esc(t('unreadColor')) + '"></span>' +
+      '</div>' +
       '<div class="actions"><button type="button" class="b" data-act="reset-font">' + esc(t('reset')) + '</button></div>' +
       '<div class="hint">' + esc(t('hintFont')) + '</div>' +
       '</div>' +
       '<div class="actions"><button type="button" class="b" data-act="close">' + esc(t('close')) + '</button></div>' +
+      '<div class="foot">v' + esc(VERSION) + ' · <a href="' + esc(PROJECT_URL) + '" target="_blank" rel="noopener noreferrer">GitHub</a></div>' +
       '</div>';
 
     panel = panelRoot.querySelector('.panel');
@@ -1100,8 +1179,8 @@
     });
 
     colorUi = {
-      input: panelRoot.querySelector('.swatch input'),
-      fill: panelRoot.querySelector('.swatch .fill'),
+      input: panelRoot.querySelector('[data-swatch="header"] input'),
+      fill: panelRoot.querySelector('[data-swatch="header"] .fill'),
       val: panelRoot.querySelector('[data-cval]'),
       reset: panelRoot.querySelector('[data-act="header-default"]')
     };
@@ -1113,6 +1192,32 @@
     });
     colorUi.reset.addEventListener('click', function () {
       settings.headerColor = '';
+      update();
+    });
+
+    unreadUi = {
+      checks: {},
+      input: panelRoot.querySelector('[data-swatch="unread"] input'),
+      fill: panelRoot.querySelector('[data-swatch="unread"] .fill'),
+      val: panelRoot.querySelector('[data-ucval]'),
+      reset: panelRoot.querySelector('[data-act="unread-color-default"]')
+    };
+    UNREAD.forEach(function (k) {
+      var box = panelRoot.querySelector('input[data-ukey="' + k + '"]');
+      unreadUi.checks[k] = box;
+      box.addEventListener('change', function () {
+        settings[k] = box.checked;
+        update();
+      });
+    });
+    unreadUi.input.addEventListener('input', function () {
+      if (/^#[0-9a-f]{6}$/i.test(unreadUi.input.value)) {
+        settings.unreadColor = unreadUi.input.value.toLowerCase();
+        update();
+      }
+    });
+    unreadUi.reset.addEventListener('click', function () {
+      settings.unreadColor = DEFAULTS.unreadColor;
       update();
     });
 
@@ -1147,6 +1252,10 @@
       FONTS.forEach(function (r) {
         settings[r.key] = DEFAULTS[r.key];
       });
+      UNREAD.forEach(function (k) {
+        settings[k] = DEFAULTS[k];
+      });
+      settings.unreadColor = DEFAULTS.unreadColor;
       update();
     });
     panelRoot.querySelector('[data-act="close"]').addEventListener('click', function () {
