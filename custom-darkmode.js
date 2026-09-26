@@ -1,6 +1,6 @@
 /*
  * SOGo Dark Mode for mailcow-dockerized
- * Version 1.3.0 – colors, header/selection color, layout, draggable borders, text size, unread highlighting
+ * Version 1.3.1 – colors, header/accent color, layout, draggable borders, text size, unread highlighting
  * -----------------------------------------------------------------------------------------------
  * File:   data/conf/sogo/custom-darkmode.js
  * Mounted as js/theme.js into the SOGo container via docker-compose.override.yml.
@@ -8,7 +8,7 @@
  *
  * Usage:
  *   - Round button top right (left of Calendar/Address Book/Mail) opens the settings
- *   - Tab "Colors": dark mode, color sliders, header color, selection color, presets
+ *   - Tab "Colors": dark mode, color sliders, header color, accent color, presets
  *   - Tab "Layout": folder pane / message list width, header / user area height
  *   - Tab "Text": text size for folder pane, message list, reading pane, header, user area,
  *     and how unread messages are highlighted in the message list
@@ -31,7 +31,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.3.0';
+  var VERSION = '1.3.1';
   var PROJECT_URL = 'https://github.com/Sub-7/mailcow-sogo-darkmode';
 
   // ---------- Server-wide defaults ----------
@@ -44,7 +44,7 @@
     hue: 0,             // hue shift in degrees (-180 to 180)
     warmth: 0,          // warmth (sepia amount) in %
     headerColor: '',    // header color as '#rrggbb', empty = SOGo default
-    selectColor: '',    // selected message/contact as '#rrggbb', empty = same as header color (or SOGo default)
+    selectColor: '',    // accent color (selected item, round "new" buttons) as '#rrggbb', empty = same as header color
     sidenavWidth: 0,    // folder pane width in px, 0 = SOGo default
     listWidth: 0,       // message list width in px, 0 = SOGo default
     toolbarHeight: 0,   // header height (top right) in px, 0 = SOGo default
@@ -94,7 +94,7 @@
       hue: 'Farbton',
       warmth: 'Wärme',
       headerColor: 'Kopfzeilen-Farbe',
-      selectColor: 'Ausgewählter Eintrag',
+      selectColor: 'Akzentfarbe',
       sameAsHeader: 'wie Kopfzeile',
       standard: 'Standard',
       presetStandard: 'Standard',
@@ -118,7 +118,8 @@
       dragTitle: 'Ziehen zum Ändern, Doppelklick: Standard',
       buttonTitle: 'Darkmode (Alt+Shift+D: ein/aus)',
       dialogLabel: 'Darkmode-Einstellungen',
-      hintColors: 'Gilt nur für diesen Browser. Alt+Shift+D schaltet ein/aus, „Auto“ folgt der Systemeinstellung.',
+      hintColors: 'Akzentfarbe: ausgewählter Eintrag und runde „Neu“-Knöpfe, standardmäßig wie die Kopfzeile. ' +
+        'Gilt nur für diesen Browser. Alt+Shift+D schaltet ein/aus, „Auto“ folgt der Systemeinstellung.',
       hintLayout: 'Die Ränder lassen sich auch direkt mit der Maus ziehen, Doppelklick auf den Rand setzt zurück. ' +
         'Breiten gelten ab 1024 px Fensterbreite. Unter 112 px Höhe wird das Profilbild ausgeblendet.',
       hintFont: 'Vergrößert Schrift und Symbole im jeweiligen Bereich. Ordnerleiste und Mailliste lassen sich ' +
@@ -144,7 +145,7 @@
       hue: 'Hue',
       warmth: 'Warmth',
       headerColor: 'Header color',
-      selectColor: 'Selected item',
+      selectColor: 'Accent color',
       sameAsHeader: 'same as header',
       standard: 'Default',
       presetStandard: 'Default',
@@ -168,7 +169,8 @@
       dragTitle: 'Drag to resize, double-click: default',
       buttonTitle: 'Dark mode (Alt+Shift+D: on/off)',
       dialogLabel: 'Dark mode settings',
-      hintColors: 'Applies to this browser only. Alt+Shift+D toggles on/off, “Auto” follows the system setting.',
+      hintColors: 'Accent color: selected item and round “new” buttons, same as the header by default. ' +
+        'Applies to this browser only. Alt+Shift+D toggles on/off, “Auto” follows the system setting.',
       hintLayout: 'You can also drag the borders directly with the mouse, double-click a border to reset. ' +
         'Widths apply from a window width of 1024 px. Below 112 px height the profile picture is hidden.',
       hintFont: 'Scales text and icons in each area. Folder pane and message list can only be enlarged, ' +
@@ -537,11 +539,12 @@
     ].join('\n');
   }
 
-  // The two headers: top left (name/email address) and top right (toolbar)
+  // The headers: top left (name/email address), top right (toolbar) and the compose window
   var HEADER_SELECTORS = [
     'md-sidenav > md-toolbar.md-tall',
     'md-toolbar.toolbar-main',
-    'md-toolbar[data-sgdm-header]'
+    'md-toolbar[data-sgdm-header]',
+    'md-dialog.sg-mail-editor md-toolbar'
   ];
 
   function headerCss() {
@@ -563,6 +566,11 @@
       '}',
       inner.join(',\n') + ' {',
       '  color: ' + fg + ' !important;',
+      '}',
+      // The sender field in the compose header keeps its own light background, so keep its text dark
+      'md-dialog.sg-mail-editor md-toolbar md-autocomplete,',
+      'md-dialog.sg-mail-editor md-toolbar md-autocomplete input {',
+      '  color: rgba(0, 0, 0, 0.87) !important;',
       '}'
     ].join('\n');
   }
@@ -638,9 +646,11 @@
     return out.join('\n');
   }
 
-  // Selected message (mail list) or contact (address book): own color, otherwise the header color.
-  // Without either, SOGo's own highlight stays.
+  // Accent color: selected message (mail list) or contact (address book) and the round
+  // "new" buttons (write message, new contact, new event). Own color, otherwise the header
+  // color. Without either, SOGo's own colors stay.
   var SELECTED_ITEM = '.view-list md-list-item.md-accent.md-bg';
+  var ACCENT_FAB = '.md-button.md-fab.md-accent';
 
   function selectionColor() {
     return settings.selectColor || settings.headerColor || '';
@@ -657,7 +667,9 @@
     return [
       SELECTED_ITEM + ' {\n  background-color: ' + bg + ' !important;\n  color: ' + fg + ' !important;\n}',
       [SELECTED_ITEM + ' .sg-tile-content', SELECTED_ITEM + ' .sg-tile-content *:not(md-icon):not(.sg-category-dot)'].join(',\n') +
-        ' {\n  color: ' + fg + ' !important;\n}'
+        ' {\n  color: ' + fg + ' !important;\n}',
+      ACCENT_FAB + ' {\n  background-color: ' + bg + ' !important;\n  color: ' + fg + ' !important;\n}',
+      ACCENT_FAB + ' md-icon {\n  color: ' + fg + ' !important;\n}'
     ].join('\n');
   }
 
