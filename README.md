@@ -4,7 +4,11 @@ A dark mode for the SOGo webmail in [mailcow-dockerized](https://github.com/mail
 
 It is a single, readable JavaScript file. It does not modify any mailcow or SOGo file and can be removed completely in a few commands.
 
-<!-- Screenshots: add before/after images here, e.g. ![Before and after](screenshots/before-after.png) -->
+| Before | After |
+|---|---|
+| ![SOGo without dark mode](screenshots/before.png) | ![SOGo with dark mode](screenshots/after.png) |
+
+![Dark mode settings panel](screenshots/settings.png)
 
 ## Features
 
