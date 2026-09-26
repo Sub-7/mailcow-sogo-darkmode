@@ -15,7 +15,7 @@ It is a single, readable JavaScript file. It does not modify any mailcow or SOGo
 - **Dark mode** for mail, calendar, contacts and preferences: *Auto* (follows the system setting), *Dark* or *Off*
 - **Toggle button** in SOGo's top right toolbar, keyboard shortcut **Alt+Shift+D**
 - **Color sliders**: darkness, brightness, contrast, saturation, hue, warmth, plus presets
-- **Header color** of your choice
+- **Header color** and **selection color** of your choice. The selected message or contact follows the header color unless you pick its own.
 - **Resizable areas**: folder pane, message list, header, user area. Drag the borders with the mouse or use the sliders. Double-click a border to reset it.
 - **Text size per area**: folder pane, message list, reading pane, header, user area
 - **Unread messages that stand out**: bold, color bar on the left, optionally a tinted background and colored subject, in a color of your choice
@@ -170,7 +170,7 @@ Both checksums must be identical. Then reload SOGo in the browser with **Ctrl+Sh
 ## Usage
 
 - **Round button** in the top right toolbar, left of Calendar/Address Book/Mail: opens the settings.
-- **Colors tab**: mode (Dark / Auto / Off), sliders, header color, presets.
+- **Colors tab**: mode (Dark / Auto / Off), sliders, header color, color of the selected message/contact, presets.
 - **Layout tab**: width of folder pane and message list, height of header and user area.
 - **Text tab**: text size per area. Folder pane and message list can only be enlarged, because SOGo's list leaves gaps while scrolling at smaller sizes. Below that: how unread messages are highlighted (bold, color bar, background, subject color, color).
 - **Borders**: hover over the border between two areas, then drag. Double-click resets it. Widths apply from a window width of 1024 px.
@@ -186,6 +186,7 @@ At the top of `custom-darkmode.js`:
 |---|---|---|
 | `DEFAULTS.mode` | `'auto'` | `'auto'` follows the system, `'dark'` = dark for everyone by default, `'light'` = off by default |
 | `DEFAULTS.*` | | Default values of all sliders |
+| `DEFAULTS.selectColor` | `''` | Selected message/contact, empty = same as header color (or SOGo's default) |
 | `DEFAULTS.unreadBold` / `unreadBar` / `unreadBg` / `unreadText` | `true` / `true` / `false` / `false` | How unread messages are highlighted |
 | `DEFAULTS.unreadColor` | `'#2196f3'` | Color for the unread highlighting |
 | `SHOW_BUTTON` | `true` | `false` hides the button (shortcut still works) |
@@ -311,6 +312,7 @@ The settings key in users' browsers (`sogoDarkModeSettings`) is harmless without
 
 ## Changelog
 
+- **1.3.0**: Color for the selected message/contact. By default it follows the header color.
 - **1.2.0**: Version and project link shown in the settings panel. New `update.sh`: one-command update with checksum verification, backup and rollback.
 - **1.1.0**: Unread messages stand out: bold, color bar on the left, optional tinted background and colored subject, color selectable (Text tab).
 - **1.0.0**: First release.

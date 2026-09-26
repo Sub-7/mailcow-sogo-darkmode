@@ -1,6 +1,6 @@
 /*
  * SOGo Dark Mode for mailcow-dockerized
- * Version 1.2.0 – colors, header color, layout, draggable borders, text size, unread highlighting
+ * Version 1.3.0 – colors, header/selection color, layout, draggable borders, text size, unread highlighting
  * -----------------------------------------------------------------------------------------------
  * File:   data/conf/sogo/custom-darkmode.js
  * Mounted as js/theme.js into the SOGo container via docker-compose.override.yml.
@@ -8,7 +8,7 @@
  *
  * Usage:
  *   - Round button top right (left of Calendar/Address Book/Mail) opens the settings
- *   - Tab "Colors": dark mode, color sliders, header color, presets
+ *   - Tab "Colors": dark mode, color sliders, header color, selection color, presets
  *   - Tab "Layout": folder pane / message list width, header / user area height
  *   - Tab "Text": text size for folder pane, message list, reading pane, header, user area,
  *     and how unread messages are highlighted in the message list
@@ -31,7 +31,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.2.0';
+  var VERSION = '1.3.0';
   var PROJECT_URL = 'https://github.com/Sub-7/mailcow-sogo-darkmode';
 
   // ---------- Server-wide defaults ----------
@@ -44,6 +44,7 @@
     hue: 0,             // hue shift in degrees (-180 to 180)
     warmth: 0,          // warmth (sepia amount) in %
     headerColor: '',    // header color as '#rrggbb', empty = SOGo default
+    selectColor: '',    // selected message/contact as '#rrggbb', empty = same as header color (or SOGo default)
     sidenavWidth: 0,    // folder pane width in px, 0 = SOGo default
     listWidth: 0,       // message list width in px, 0 = SOGo default
     toolbarHeight: 0,   // header height (top right) in px, 0 = SOGo default
@@ -93,6 +94,8 @@
       hue: 'Farbton',
       warmth: 'Wärme',
       headerColor: 'Kopfzeilen-Farbe',
+      selectColor: 'Ausgewählter Eintrag',
+      sameAsHeader: 'wie Kopfzeile',
       standard: 'Standard',
       presetStandard: 'Standard',
       presetBlack: 'Schwarz',
@@ -141,6 +144,8 @@
       hue: 'Hue',
       warmth: 'Warmth',
       headerColor: 'Header color',
+      selectColor: 'Selected item',
+      sameAsHeader: 'same as header',
       standard: 'Default',
       presetStandard: 'Default',
       presetBlack: 'Black',
@@ -270,6 +275,7 @@
       out[r.key] = isFinite(v) ? clamp(Math.round(v), r.min, r.max) : DEFAULTS[r.key];
     });
     out.headerColor = /^#[0-9a-f]{6}$/i.test(String(s.headerColor || '')) ? String(s.headerColor).toLowerCase() : '';
+    out.selectColor = /^#[0-9a-f]{6}$/i.test(String(s.selectColor || '')) ? String(s.selectColor).toLowerCase() : '';
     UNREAD.forEach(function (k) {
       out[k] = typeof s[k] === 'boolean' ? s[k] : DEFAULTS[k];
     });
@@ -632,8 +638,31 @@
     return out.join('\n');
   }
 
+  // Selected message (mail list) or contact (address book): own color, otherwise the header color.
+  // Without either, SOGo's own highlight stays.
+  var SELECTED_ITEM = '.view-list md-list-item.md-accent.md-bg';
+
+  function selectionColor() {
+    return settings.selectColor || settings.headerColor || '';
+  }
+
+  function selectionCss() {
+    var visibleBg = selectionColor();
+    if (!visibleBg) {
+      return '';
+    }
+    var visibleFg = luminance(hexToRgb(visibleBg)) > 0.4 ? '#202020' : '#f5f5f5';
+    var bg = cssColorFor(visibleBg);
+    var fg = cssColorFor(visibleFg);
+    return [
+      SELECTED_ITEM + ' {\n  background-color: ' + bg + ' !important;\n  color: ' + fg + ' !important;\n}',
+      [SELECTED_ITEM + ' .sg-tile-content', SELECTED_ITEM + ' .sg-tile-content *:not(md-icon):not(.sg-category-dot)'].join(',\n') +
+        ' {\n  color: ' + fg + ' !important;\n}'
+    ].join('\n');
+  }
+
   function pageCss() {
-    return [darkCss(), headerCss(), layoutCss(), fontCss(), unreadCss()].filter(Boolean).join('\n');
+    return [darkCss(), headerCss(), layoutCss(), fontCss(), unreadCss(), selectionCss()].filter(Boolean).join('\n');
   }
 
   // Inside the editor (own document in an iframe) invert images back
@@ -742,6 +771,7 @@
   var fontSliders = {};
   var colorUi = null;
   var unreadUi = null;
+  var selectUi = null;
   var tabButtons = {};
   var pages = {};
   var currentTab = 'colors';
@@ -897,6 +927,16 @@
     return rgbToHex(filterActive() ? forward(filterOps(), c) : c);
   }
 
+  // Visible color of SOGo's own selection highlight (for the color picker while nothing is set)
+  function currentSelectionHex() {
+    var el = document.querySelector(SELECTED_ITEM);
+    var c = el ? parseCssColor(window.getComputedStyle(el).backgroundColor) : null;
+    if (!c) {
+      return currentHeaderHex();
+    }
+    return rgbToHex(filterActive() ? forward(filterOps(), c) : c);
+  }
+
   function syncUi() {
     if (!panelRoot) {
       return;
@@ -936,6 +976,12 @@
     colorUi.fill.style.background = cssColorFor(shown);
     colorUi.val.textContent = settings.headerColor ? settings.headerColor : t('standard');
     colorUi.reset.hidden = !settings.headerColor;
+    var selShown = selectionColor() || currentSelectionHex();
+    selectUi.input.value = selShown;
+    selectUi.fill.style.background = cssColorFor(selShown);
+    selectUi.val.textContent = settings.selectColor ? settings.selectColor
+      : (settings.headerColor ? t('sameAsHeader') : t('standard'));
+    selectUi.reset.hidden = !settings.selectColor;
     UNREAD.forEach(function (k) {
       unreadUi.checks[k].checked = !!settings[k];
     });
@@ -1093,6 +1139,11 @@
       '<button type="button" class="one" data-act="header-default" title="' + esc(t('resetOne')) + '">↺</button></label>' +
       '<span class="swatch" data-swatch="header"><span class="fill"></span><input type="color" aria-label="' + esc(t('headerColor')) + '"></span>' +
       '</div>' +
+      '<div class="row color"><label><span class="name">' + esc(t('selectColor')) + '</span>' +
+      '<span data-sval></span>' +
+      '<button type="button" class="one" data-act="select-default" title="' + esc(t('resetOne')) + '">↺</button></label>' +
+      '<span class="swatch" data-swatch="select"><span class="fill"></span><input type="color" aria-label="' + esc(t('selectColor')) + '"></span>' +
+      '</div>' +
       '<div class="presets">' + presets + '</div>' +
       '<div class="actions"><button type="button" class="b" data-act="reset-colors">' + esc(t('reset')) + '</button></div>' +
       '<div class="hint">' + esc(t('hintColors')) + '</div>' +
@@ -1195,6 +1246,23 @@
       update();
     });
 
+    selectUi = {
+      input: panelRoot.querySelector('[data-swatch="select"] input'),
+      fill: panelRoot.querySelector('[data-swatch="select"] .fill'),
+      val: panelRoot.querySelector('[data-sval]'),
+      reset: panelRoot.querySelector('[data-act="select-default"]')
+    };
+    selectUi.input.addEventListener('input', function () {
+      if (/^#[0-9a-f]{6}$/i.test(selectUi.input.value)) {
+        settings.selectColor = selectUi.input.value.toLowerCase();
+        update();
+      }
+    });
+    selectUi.reset.addEventListener('click', function () {
+      settings.selectColor = '';
+      update();
+    });
+
     unreadUi = {
       checks: {},
       input: panelRoot.querySelector('[data-swatch="unread"] input'),
@@ -1240,6 +1308,7 @@
         settings[r.key] = DEFAULTS[r.key];
       });
       settings.headerColor = DEFAULTS.headerColor;
+      settings.selectColor = DEFAULTS.selectColor;
       update();
     });
     panelRoot.querySelector('[data-act="reset-layout"]').addEventListener('click', function () {
