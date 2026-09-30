@@ -15,11 +15,11 @@ It is a single, readable JavaScript file. It does not modify any mailcow or SOGo
 - **Dark mode** for mail, calendar, contacts and preferences: *Auto* (follows the system setting), *Dark* or *Off*
 - **Toggle button** in SOGo's top right toolbar, keyboard shortcut **Alt+Shift+D**
 - **Color sliders**: darkness, brightness, contrast, saturation, hue, warmth, plus presets
-- **Header color** and **accent color** of your choice. The header color also applies to the compose window. The accent color (selected message/contact, round "new" buttons) follows the header color unless you pick its own.
+- **Header color** and **accent color** of your choice, shown exactly as picked in dark mode too. The header color also applies to the compose window. The accent color (selected message/contact, round "new" buttons) follows the header color unless you pick its own.
 - **Resizable areas**: folder pane, message list, header, user area. Drag the borders with the mouse or use the sliders. Double-click a border to reset it.
 - **Text size per area**: folder pane, message list, reading pane, header, user area
 - **Unread messages that stand out**: bold, color bar on the left, optionally a tinted background and colored subject, in a color of your choice
-- **English and German** interface, following the language set in SOGo
+- **Multilingual interface**: follows the language set in SOGo, otherwise the browser language. Adding a language is one short block in the script, translations are welcome.
 - **Settings per browser**: every user chooses their own, nothing is stored on the server
 - **One-command updates** with checksum verification, backup and rollback
 
@@ -44,7 +44,7 @@ Yes. Here is exactly what it does and doesn't touch.
 **In the browser.** The script runs with the same rights as SOGo's own JavaScript, so please review it before installing. It is one unminified file.
 - No network access of any kind: no `fetch`, `XMLHttpRequest`, WebSocket or `sendBeacon`, no external resources, no `eval`, no cookies
 - Stores only the localStorage key `sogoDarkModeSettings`
-- Adds one `<style>` element, three own elements in Shadow DOM (button, settings panel, border handles) and two `data-sgdm-*` attributes. It also adds a style to the mail editor.
+- Adds one `<style>` element, three own elements in Shadow DOM (button, settings panel, border handles), empty color layers for exact colors in dark mode (plain `div` elements that never take clicks) and two `data-sgdm-*` attributes. It also adds a style to the mail editor.
 - Listens to the keyboard only for Alt+Shift+D and Esc and records nothing
 - Does not read or process mail content
 
@@ -58,7 +58,7 @@ grep -nE "fetch|XMLHttpRequest|WebSocket|sendBeacon|eval\(|Function\(|cookie" cu
 
 - **`custom-theme.js`:** mailcow mounts `data/conf/sogo/custom-theme.js` as SOGo's `js/theme.js`. By default that file contains only a commented-out example. This dark mode takes that mount. If you customized `custom-theme.js` for your own SOGo colors, those won't load while the dark mode is installed. Your file itself is not touched.
 - **HTML emails** with their own colors are shown inverted as well. Images, photos and avatars keep their normal colors.
-- **How it works:** the whole page gets a CSS color filter. On very weak devices, scrolling can feel slightly less smooth.
+- **How it works:** the whole page gets a CSS color filter. The colors you pick (header, accent, unread messages) are drawn on top with color layers, so they appear exactly as chosen. On very weak devices, scrolling can feel slightly less smooth.
 - **Text size** needs CSS `zoom` support: current Chrome/Edge, Safari and Firefox 126 or newer.
 
 ## Try it first, without touching the server
@@ -305,13 +305,14 @@ The settings key in users' browsers (`sogoDarkModeSettings`) is harmless without
 ## Known limitations
 
 - HTML emails with their own colors are inverted too.
-- In dark mode, very bright or very saturated header colors look slightly muted below 100 % darkness. The color swatch in the panel shows exactly what you get.
+- In dark mode, the subject color of unread messages (*Colored subject*) is as close as the color filter allows. Very saturated colors, for example pure blue, look lighter there. Color bar and background are exact.
 - Text size of folder pane and message list can't go below 100 %.
 - Widths only apply from a window width of 1024 px. Below that, SOGo shows the folder pane as a slide-out menu.
 - Settings are stored per browser, not per SOGo account.
 
 ## Changelog
 
+- **1.4.0**: Colors you pick are now shown exactly in dark mode, at any darkness level: header, compose window header, accent color (selected item, round "new" buttons), color bar and background of unread messages, and the color swatches in the panel. Before, the color filter changed them (pure blue looked almost black). Menus, tooltips, messages and dialogs on top keep their own colors. Dialog backdrops now dim the page in dark mode instead of covering it with a light gray haze.
 - **1.3.1**: Header color now also applies to the compose window (normal and full size). The round "new" buttons (write message, new contact, new event) use the accent color. "Selected item" is now called "Accent color".
 - **1.3.0**: Color for the selected message/contact. By default it follows the header color.
 - **1.2.0**: Version and project link shown in the settings panel. New `update.sh`: one-command update with checksum verification, backup and rollback.

@@ -1,6 +1,6 @@
 /*
  * SOGo Dark Mode for mailcow-dockerized
- * Version 1.3.1 – colors, header/accent color, layout, draggable borders, text size, unread highlighting
+ * Version 1.4.0 – exact colors in dark mode, header/accent color, layout, draggable borders, text size, unread highlighting
  * -----------------------------------------------------------------------------------------------
  * File:   data/conf/sogo/custom-darkmode.js
  * Mounted as js/theme.js into the SOGo container via docker-compose.override.yml.
@@ -31,7 +31,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.3.1';
+  var VERSION = '1.4.0';
   var PROJECT_URL = 'https://github.com/Sub-7/mailcow-sogo-darkmode';
 
   // ---------- Server-wide defaults ----------
@@ -498,12 +498,158 @@
     return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
   }
 
-  // CSS color needed so that "visibleHex" appears on screen
+  // Perceptual color distance (CIELAB)
+  function toLab(c) {
+    var lin = c.map(function (v) {
+      return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    var f = function (x) {
+      return x > 0.008856 ? Math.cbrt(x) : 7.787 * x + 16 / 116;
+    };
+    var X = f((0.4124 * lin[0] + 0.3576 * lin[1] + 0.1805 * lin[2]) / 0.95047);
+    var Y = f(0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]);
+    var Z = f((0.0193 * lin[0] + 0.1192 * lin[1] + 0.9505 * lin[2]) / 1.08883);
+    return [116 * Y - 16, 500 * (X - Y), 200 * (Y - Z)];
+  }
+
+  function colorDistance(a, b) {
+    var A = toLab(a);
+    var B = toLab(b);
+    return Math.sqrt(Math.pow(A[0] - B[0], 2) + Math.pow(A[1] - B[1], 2) + Math.pow(A[2] - B[2], 2));
+  }
+
+  // Closest color the filter can produce (for targets outside what the filter can show)
+  function nearestPreimage(ops, target) {
+    var N = 10;
+    var best = [1, 1, 1];
+    var bestD = Infinity;
+    var i, j, k, x, d, a, step, improved;
+    for (i = 0; i <= N; i++) {
+      for (j = 0; j <= N; j++) {
+        for (k = 0; k <= N; k++) {
+          x = [i / N, j / N, k / N];
+          d = colorDistance(forward(ops, x), target);
+          if (d < bestD) {
+            bestD = d;
+            best = x;
+          }
+        }
+      }
+    }
+    step = 1 / N;
+    while (step > 0.001) {
+      improved = false;
+      for (a = 0; a < 3; a++) {
+        [-step, step].forEach(function (delta) {
+          var y = best.slice();
+          y[a] = clamp(y[a] + delta, 0, 1);
+          var dd = colorDistance(forward(ops, y), target);
+          if (dd < bestD) {
+            bestD = dd;
+            best = y;
+            improved = true;
+          }
+        });
+      }
+      if (!improved) {
+        step /= 2;
+      }
+    }
+    return best;
+  }
+
+  var colorCache = {};
+  var colorCacheSize = 0;
+
+  // CSS color needed so that "visibleHex" appears on screen (for colors that stay under the filter)
   function cssColorFor(visibleHex) {
     if (!filterActive()) {
       return visibleHex;
     }
-    return rgbToHex(preimage(filterOps(), hexToRgb(visibleHex)));
+    var key = visibleHex + '|' + pageFilter();
+    if (colorCache[key]) {
+      return colorCache[key];
+    }
+    var ops = filterOps();
+    var target = hexToRgb(visibleHex);
+    var x = preimage(ops, target);
+    if (colorDistance(forward(ops, x), target) > 2) {
+      var y = nearestPreimage(ops, target);
+      if (colorDistance(forward(ops, y), target) < colorDistance(forward(ops, x), target)) {
+        x = y;
+      }
+    }
+    if (colorCacheSize > 300) {
+      colorCache = {};
+      colorCacheSize = 0;
+    }
+    colorCache[key] = rgbToHex(x);
+    colorCacheSize++;
+    return colorCache[key];
+  }
+
+  // Exact colors: the element is painted plain white (dark colors) or black (light colors) under
+  // the filter, and color layers outside the filter (children of <html>) turn that into the exact
+  // color. The main layer uses mix-blend-mode "screen" (dark colors, light text) or "multiply"
+  // (light colors, dark text). Color channels beyond what the filter can reach (darker than its
+  // darkest or lighter than its lightest value, below 100 % darkness) get a second layer with
+  // "color-burn" or "color-dodge". Each channel is changed by one layer only, the other one
+  // leaves it as it is.
+  // dim: share of a dialog backdrop on top (0 to 1), which fades the page towards the dark
+  // background (see darkCss). The layers lie above the backdrop, so they include it.
+  function exactPlan(hex, dim) {
+    var a = dim || 0;
+    var ops = filterOps();
+    var C = hexToRgb(hex);
+    var light = luminance(C) > 0.4;
+    var bgCss = light ? [0, 0, 0] : [1, 1, 1];
+    var u = forward(ops, bgCss.map(function (v) {
+      return v * (1 - a) + a;
+    }));
+    if (a > 0) {
+      C = dimmed(C, a);
+    }
+    var main = [];
+    var extra = [];
+    var needExtra = false;
+    for (var i = 0; i < 3; i++) {
+      var c = C[i];
+      var b = u[i];
+      if (!light) {
+        if (c >= b || b >= 1) {
+          main.push(b < 1 ? clamp((c - b) / (1 - b), 0, 1) : 0); // screen
+          extra.push(1);                                          // color-burn with 1 = unchanged
+        } else {
+          main.push(0);                                           // screen with 0 = unchanged
+          extra.push(clamp((1 - b) / (1 - c), 0, 1));             // color-burn: 1 - (1 - b) / o = c
+          needExtra = true;
+        }
+      } else if (c <= b || b <= 0) {
+        main.push(b > 0 ? clamp(c / b, 0, 1) : 1);                // multiply
+        extra.push(0);                                            // color-dodge with 0 = unchanged
+      } else {
+        main.push(1);                                             // multiply with 1 = unchanged
+        extra.push(clamp(1 - b / c, 0, 1));                       // color-dodge: b / (1 - o) = c
+        needExtra = true;
+      }
+    }
+    var out = [{ mode: light ? 'multiply' : 'screen', color: rgbToHex(main) }];
+    if (needExtra) {
+      out.push({ mode: light ? 'color-dodge' : 'color-burn', color: rgbToHex(extra) });
+    }
+    return {
+      layers: out,
+      bg: rgbToHex(bgCss),
+      fg: light ? '#ffffff' : '#000000'
+    };
+  }
+
+  // A color as it looks under a dialog backdrop with share a
+  function dimmed(C, a) {
+    var k = forward(filterOps(), [1, 1, 1]);
+    return C.map(function (c, i) {
+      return c * (1 - a) + k[i] * a;
+    });
   }
 
   // ---------- Build CSS ----------
@@ -521,22 +667,42 @@
     return 'invert(1) hue-rotate(' + (180 - settings.hue) + 'deg)';
   }
 
-  // The editor frame (CKEditor) stays inverted so composing is dark too
+  // Background color of SOGo's page (before the filter)
+  var pageBase = null;
+
+  function pageBaseColor() {
+    if (!pageBase && document.body) {
+      pageBase = parseCssColor(window.getComputedStyle(document.body).backgroundColor) || [1, 1, 1];
+    }
+    return pageBase || [1, 1, 1];
+  }
+
+  // The filter sits on <body>. <html> gets the dark page color, so the exact-color layers
+  // (children of <html>, outside the filter) can blend on top of the filtered page.
+  // The editor frame (CKEditor) stays inverted so composing is dark too.
+  // Only on screen: printing uses the normal colors.
   function darkCss() {
     if (!filterActive()) {
       return '';
     }
-    return [
+    return '@media screen {\n' + [
       'html {',
-      '  background-color: #ffffff !important;',
+      '  background-color: ' + rgbToHex(forward(filterOps(), pageBaseColor())) + ' !important;',
+      '}',
+      'body {',
       '  filter: ' + pageFilter() + ' !important;',
+      '}',
+      // Dialog backdrops: white under the filter, so they fade the page towards dark
+      // (SOGo's dark gray would turn into a light haze)
+      'md-backdrop.md-opaque, .md-panel._md-panel-backdrop {',
+      '  background-color: #ffffff !important;',
       '}',
       'img, picture, video, canvas, object, embed,',
       'iframe:not(.cke_wysiwyg_frame),',
       '[style*="background-image"] {',
       '  filter: ' + mediaFilter() + ' !important;',
       '}'
-    ].join('\n');
+    ].join('\n') + '\n}';
   }
 
   // The headers: top left (name/email address), top right (toolbar) and the compose window
@@ -551,10 +717,16 @@
     if (!settings.headerColor) {
       return '';
     }
-    var visibleBg = settings.headerColor;
-    var visibleFg = luminance(hexToRgb(visibleBg)) > 0.4 ? '#202020' : '#f5f5f5';
-    var bg = cssColorFor(visibleBg);
-    var fg = cssColorFor(visibleFg);
+    var bg;
+    var fg;
+    if (filterActive()) {
+      var plan = exactPlan(settings.headerColor);
+      bg = plan.bg;
+      fg = plan.fg;
+    } else {
+      bg = settings.headerColor;
+      fg = luminance(hexToRgb(bg)) > 0.4 ? '#202020' : '#f5f5f5';
+    }
     var inner = [];
     HEADER_SELECTORS.forEach(function (sel) {
       inner.push(sel + ' md-icon:not(.sg-icon--badge)', sel + ' p', sel + ' .md-caption', sel + ' .md-button');
@@ -622,8 +794,34 @@
 
   // Unread messages: SOGo sets the class "unread" on the list item and only uses a
   // slightly heavier font, which is hard to spot. These rules make it stand out.
+  // In dark mode the color bar and the tinted background get their exact color from a color
+  // layer (see exactPlan), the subject text as close as the filter allows.
+  var UNREAD_ITEM = 'md-list-item.sg-message-list-item.unread';
+
+  // Background of the message list (before the filter)
+  function listBackground() {
+    var el = document.querySelector('.view-list md-content') || document.querySelector('.view-list');
+    while (el && el !== document.documentElement) {
+      var c = parseCssColor(window.getComputedStyle(el).backgroundColor);
+      if (c) {
+        return c;
+      }
+      el = el.parentElement;
+    }
+    return pageBaseColor();
+  }
+
+  // Visible color of the tinted background in dark mode: 16 % of the color over the dark list
+  function unreadMixHex() {
+    var base = forward(filterOps(), listBackground());
+    var C = hexToRgb(settings.unreadColor);
+    return rgbToHex(base.map(function (b, i) {
+      return b * 0.84 + C[i] * 0.16;
+    }));
+  }
+
   function unreadCss() {
-    var item = 'md-list-item.sg-message-list-item.unread';
+    var item = UNREAD_ITEM;
     var color = cssColorFor(settings.unreadColor);
     var out = [];
     if (settings.unreadBold) {
@@ -634,11 +832,16 @@
       out.push(item + ' {\n  box-shadow: inset 4px 0 0 ' + color + ' !important;\n}');
     }
     if (settings.unreadBg) {
-      var c = hexToRgb(color).map(function (v) {
-        return Math.round(v * 255);
-      });
+      var bg;
+      if (filterActive()) {
+        bg = exactPlan(unreadMixHex()).bg;
+      } else {
+        bg = 'rgba(' + hexToRgb(settings.unreadColor).map(function (v) {
+          return Math.round(v * 255);
+        }).join(', ') + ', 0.16)';
+      }
       // not on the selected message, SOGo marks that one with md-bg
-      out.push(item + ':not(.md-bg) {\n  background-color: rgba(' + c.join(', ') + ', 0.16) !important;\n}');
+      out.push(item + ':not(.md-bg) {\n  background-color: ' + bg + ' !important;\n}');
     }
     if (settings.unreadText) {
       out.push(item + ' .sg-tile-subject {\n  color: ' + color + ' !important;\n}');
@@ -661,9 +864,16 @@
     if (!visibleBg) {
       return '';
     }
-    var visibleFg = luminance(hexToRgb(visibleBg)) > 0.4 ? '#202020' : '#f5f5f5';
-    var bg = cssColorFor(visibleBg);
-    var fg = cssColorFor(visibleFg);
+    var bg;
+    var fg;
+    if (filterActive()) {
+      var plan = exactPlan(visibleBg);
+      bg = plan.bg;
+      fg = plan.fg;
+    } else {
+      bg = visibleBg;
+      fg = luminance(hexToRgb(bg)) > 0.4 ? '#202020' : '#f5f5f5';
+    }
     return [
       SELECTED_ITEM + ' {\n  background-color: ' + bg + ' !important;\n  color: ' + fg + ' !important;\n}',
       [SELECTED_ITEM + ' .sg-tile-content', SELECTED_ITEM + ' .sg-tile-content *:not(md-icon):not(.sg-category-dot)'].join(',\n') +
@@ -674,7 +884,10 @@
   }
 
   function pageCss() {
-    return [darkCss(), headerCss(), layoutCss(), fontCss(), unreadCss(), selectionCss()].filter(Boolean).join('\n');
+    return [
+      darkCss(), headerCss(), layoutCss(), fontCss(), unreadCss(), selectionCss(),
+      '@media print {\n  .sgdm-layer {\n    display: none !important;\n  }\n}'
+    ].filter(Boolean).join('\n');
   }
 
   // Inside the editor (own document in an iframe) invert images back
@@ -757,6 +970,7 @@
     applyAllEditors();
     syncUi();
     positionHandles();
+    scheduleLayers();
     save();
   }
 
@@ -897,6 +1111,7 @@
       syncUi();
       positionPanel();
     }
+    scheduleLayers();
   }
 
   function showTab(tab) {
@@ -906,6 +1121,7 @@
       tabButtons[k].classList.toggle('active', k === tab);
     });
     positionPanel();
+    scheduleLayers();
   }
 
   // Measure the current size of an area (for "Auto" sliders)
@@ -984,7 +1200,7 @@
     });
     var shown = settings.headerColor || currentHeaderHex();
     colorUi.input.value = shown;
-    // The swatch itself is under the filter -> compute backwards first
+    // The swatches are under the filter: computed backwards here, own colors get an exact layer on top
     colorUi.fill.style.background = cssColorFor(shown);
     colorUi.val.textContent = settings.headerColor ? settings.headerColor : t('standard');
     colorUi.reset.hidden = !settings.headerColor;
@@ -1184,6 +1400,10 @@
       '</div>';
 
     panel = panelRoot.querySelector('.panel');
+    // The color swatches have layers that follow them (see syncLayers)
+    panel.addEventListener('scroll', function () {
+      scheduleLayers();
+    });
 
     ['colors', 'layout', 'font'].forEach(function (k) {
       tabButtons[k] = panelRoot.querySelector('[data-tab="' + k + '"]');
@@ -1583,6 +1803,453 @@
     }, 700);
   }
 
+  // ---------- Exact colors in dark mode ----------
+  // The page filter can't produce every color (pure blue comes out almost black). Everything
+  // colored with a color from the panel therefore gets color layers outside the filter (see
+  // exactPlan): headers, the compose window header, the round "new" buttons, the selected item,
+  // color bar and background of unread messages, and the color swatches in the panel.
+  // The layers are plain elements without content, never take clicks and follow their element
+  // on scrolling, resizing and animations. Cut out of each layer: everything lying on top of the
+  // element (menus, tooltips, messages, suggestion lists, dialogs, the settings panel) and the
+  // parts inside it that keep their own colors (pictures, tag dots, the sender field in the
+  // compose header). Under a dialog backdrop the layers are dimmed like the rest of the page.
+  var layers = [];
+  var layersQueued = false;
+  var animUntil = 0;
+  var animRunning = false;
+
+  // Elements that can lie on top of a colored element
+  var FLOATING = [
+    '.md-open-menu-container',
+    '.md-select-menu-container',
+    '.md-panel:not(._md-panel-backdrop)',
+    'md-tooltip',
+    '.md-tooltip',
+    'md-toast',
+    '.md-autocomplete-suggestions-container',
+    '.md-datepicker-calendar-pane',
+    'md-bottom-sheet',
+    'md-dialog',
+    '.md-button.md-fab'
+  ].join(',');
+
+  // Parts inside a colored element that keep their own colors: profile pictures, tag dots,
+  // the sender field in the compose header (md-autocomplete, only if it has its own background)
+  var KEEP_INSIDE = 'sg-avatar-image img, .sg-category-dot, md-autocomplete';
+
+  function newLayer() {
+    var d = document.createElement('div');
+    d.className = 'sgdm-layer';
+    d.setAttribute('aria-hidden', 'true');
+    d.style.cssText = 'position:fixed;display:none;pointer-events:none;z-index:2147482990;' +
+      'margin:0;padding:0;border:0;box-sizing:border-box;';
+    document.documentElement.appendChild(d);
+    layers.push(d);
+    return d;
+  }
+
+  function isRound(el, r) {
+    var v = window.getComputedStyle(el).borderTopLeftRadius || '';
+    var n = parseFloat(v) || 0;
+    if (v.indexOf('%') !== -1) {
+      return n >= 50;
+    }
+    return n >= Math.min(r.width, r.height) / 2 - 1;
+  }
+
+  // Visible area of an element as a hole, or null
+  function holeFor(el, ownBackgroundOnly) {
+    var r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) {
+      return null;
+    }
+    var cs = window.getComputedStyle(el);
+    if (cs.visibility === 'hidden' || Number(cs.opacity) < 0.01) {
+      return null;
+    }
+    if (ownBackgroundOnly && !parseCssColor(cs.backgroundColor)) {
+      return null;
+    }
+    return { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom, round: isRound(el, r) };
+  }
+
+  // Dialogs, the image viewer and the slide-out folder pane dim the page with a backdrop.
+  // Menus and selection lists add an invisible one only to catch clicks, that one doesn't count.
+  function dimmingBackdrops() {
+    var out = [];
+    Array.prototype.forEach.call(document.querySelectorAll('md-backdrop, .md-panel._md-panel-backdrop'), function (el) {
+      var cs = window.getComputedStyle(el);
+      var m = String(cs.backgroundColor).match(/rgba?\(([^)]*)\)/);
+      if (!m || cs.display === 'none' || cs.visibility === 'hidden') {
+        return;
+      }
+      var parts = m[1].split(/[\s,\/]+/).filter(Boolean);
+      var alpha = parts.length > 3 ? Number(parts[3]) : 1;
+      var a = alpha * Number(cs.opacity);
+      if (a > 0.005) {
+        var r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) {
+          out.push({ el: el, a: Math.min(1, a) });
+        }
+      }
+    });
+    return out;
+  }
+
+  // Share of the backdrops lying on top of an element: dialogs are above the dialog backdrops,
+  // the slide-out folder pane is above its own backdrop.
+  function dimFor(el, backdrops) {
+    if (!backdrops.length) {
+      return 0;
+    }
+    var inDialog = !!el.closest('md-dialog');
+    var inSlideOut = !!el.closest('md-sidenav:not(.md-locked-open)');
+    var keep = 1;
+    backdrops.forEach(function (b) {
+      if (inDialog && b.el.tagName === 'MD-BACKDROP') {
+        return;
+      }
+      if (inSlideOut && b.el.classList.contains('md-sidenav-backdrop')) {
+        return;
+      }
+      keep *= 1 - b.a;
+    });
+    return Math.round((1 - keep) * 1000) / 1000;
+  }
+
+  // Rounded corners of the layer: round buttons, the top corners of a dialog, the panel swatches
+  function layerRadius(tg, r) {
+    if (tg.bar) {
+      return '0';
+    }
+    if (tg.el.matches(ACCENT_FAB) || isRound(tg.el, r)) {
+      return '50%';
+    }
+    var box = tg.panel ? tg.el.parentNode : tg.el.closest('md-dialog');
+    if (!box || !box.getBoundingClientRect) {
+      return '0';
+    }
+    var cs = window.getComputedStyle(box);
+    var rad = (parseFloat(cs.borderTopLeftRadius) || 0) - (parseFloat(cs.borderTopWidth) || 0);
+    if (rad <= 0) {
+      return '0';
+    }
+    if (tg.panel) {
+      return rad + 'px';
+    }
+    // Only if the header sits at the top edge of the dialog
+    return Math.abs(box.getBoundingClientRect().top + (parseFloat(cs.borderTopWidth) || 0) - r.top) < 1 ?
+      rad + 'px ' + rad + 'px 0 0' : '0';
+  }
+
+  function layerTargets() {
+    var out = [];
+    var seen = [];
+    if (!filterActive() || !document.body) {
+      return out;
+    }
+    // opts: clip = element to clip to, panel = swatch in the panel,
+    // normal = plain color without blending (areas without text), bar = unread color bar only
+    function add(el, hex, opts) {
+      var kind = opts.bar ? 'bar' : 'area';
+      if (!el || !hex) {
+        return;
+      }
+      for (var i = 0; i < seen.length; i++) {
+        if (seen[i].el === el && seen[i].kind === kind) {
+          return;
+        }
+      }
+      seen.push({ el: el, kind: kind });
+      out.push({
+        el: el,
+        hex: hex,
+        clip: opts.clip || null,
+        panel: !!opts.panel,
+        normal: !!opts.normal,
+        bar: !!opts.bar
+      });
+    }
+    function listClip(el) {
+      return el.closest('md-virtual-repeat-container') || el.closest('md-content');
+    }
+    // Order = stacking order of the layers
+    if (settings.headerColor) {
+      Array.prototype.forEach.call(document.querySelectorAll(HEADER_SELECTORS.join(',')), function (el) {
+        add(el, settings.headerColor, {});
+      });
+    }
+    var accent = selectionColor();
+    if (accent) {
+      Array.prototype.forEach.call(document.querySelectorAll(ACCENT_FAB), function (el) {
+        add(el, accent, {});
+      });
+    }
+    var unread = (settings.unreadBar || settings.unreadBg) ?
+      document.querySelectorAll('.view-list ' + UNREAD_ITEM) : [];
+    if (settings.unreadBg && unread.length) {
+      var mix = unreadMixHex();
+      Array.prototype.forEach.call(unread, function (el) {
+        if (!el.classList.contains('md-bg')) {
+          add(el, mix, { clip: listClip(el) });
+        }
+      });
+    }
+    if (accent) {
+      Array.prototype.forEach.call(document.querySelectorAll(SELECTED_ITEM), function (el) {
+        add(el, accent, { clip: listClip(el) });
+      });
+    }
+    if (settings.unreadBar) {
+      Array.prototype.forEach.call(unread, function (el) {
+        add(el, settings.unreadColor, { clip: listClip(el), normal: true, bar: true });
+      });
+    }
+    if (isPanelOpen() && colorUi && selectUi && unreadUi) {
+      add(colorUi.fill, settings.headerColor, { panel: true, clip: panel, normal: true });
+      add(selectUi.fill, accent, { panel: true, clip: panel, normal: true });
+      add(unreadUi.fill, settings.unreadColor, { panel: true, clip: panel, normal: true });
+    }
+    return out;
+  }
+
+  // Holes that overlap each other are merged, so that none of them fills the other again
+  function mergeHoles(list) {
+    var merged = true;
+    while (merged) {
+      merged = false;
+      for (var i = 0; i < list.length && !merged; i++) {
+        for (var j = i + 1; j < list.length; j++) {
+          var a = list[i];
+          var b = list[j];
+          if (a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2) {
+            list[i] = {
+              x1: Math.min(a.x1, b.x1), y1: Math.min(a.y1, b.y1),
+              x2: Math.max(a.x2, b.x2), y2: Math.max(a.y2, b.y2), round: false
+            };
+            list.splice(j, 1);
+            merged = true;
+            break;
+          }
+        }
+      }
+    }
+    return list;
+  }
+
+  // clip-path of a layer (size W x H at L/T) with holes, "none" without holes
+  function holeClipPath(holes, L, T, W, H) {
+    if (!holes.length) {
+      return 'none';
+    }
+    var px = function (x, y) {
+      return (Math.round(x * 10) / 10) + 'px ' + (Math.round(y * 10) / 10) + 'px';
+    };
+    var pts = ['0 0', W + 'px 0', W + 'px ' + H + 'px', '0 ' + H + 'px', '0 0'];
+    holes.forEach(function (h) {
+      var x1 = h.x1 - L;
+      var y1 = h.y1 - T;
+      var x2 = h.x2 - L;
+      var y2 = h.y2 - T;
+      var ring = [];
+      if (h.round) {
+        var cx = (x1 + x2) / 2;
+        var cy = (y1 + y2) / 2;
+        var rad = Math.max(x2 - x1, y2 - y1) / 2 + 0.5;
+        for (var k = 0; k < 32; k++) {
+          var a = k / 32 * 2 * Math.PI;
+          ring.push(px(cx + rad * Math.cos(a), cy + rad * Math.sin(a)));
+        }
+      } else {
+        ring.push(px(x1, y1), px(x2, y1), px(x2, y2), px(x1, y2));
+      }
+      ring.push(ring[0]);
+      // Way in and out on the same line: doesn't change the area
+      pts = pts.concat(ring, ['0 0']);
+    });
+    return 'polygon(evenodd, ' + pts.join(', ') + ')';
+  }
+
+  function syncLayers() {
+    var targets = layerTargets();
+    var backdrops = targets.length ? dimmingBackdrops() : [];
+    var floating = [];
+    if (targets.length) {
+      Array.prototype.forEach.call(document.querySelectorAll(FLOATING), function (el) {
+        var h = holeFor(el, false);
+        if (h) {
+          h.el = el;
+          floating.push(h);
+        }
+      });
+      // Own button, if it floats instead of sitting in the toolbar
+      if (btn && btnHost && btnHost.style.position === 'fixed') {
+        var bh = holeFor(btn, false);
+        if (bh) {
+          floating.push(bh);
+        }
+      }
+    }
+    var pr = isPanelOpen() ? panel.getBoundingClientRect() : null;
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var n = 0;
+    targets.forEach(function (tg) {
+      var r = tg.el.getBoundingClientRect();
+      var left = r.left;
+      var top = r.top;
+      var right = r.right;
+      var bottom = r.bottom;
+      if (tg.bar) {
+        // 4px (times the text size zoom) at the left edge, like the box-shadow in unreadCss
+        var z = tg.el.currentCSSZoom || (tg.el.offsetWidth ? r.width / tg.el.offsetWidth : 1) || 1;
+        right = Math.min(right, left + 4 * z);
+      }
+      if (tg.clip) {
+        var c = tg.clip.getBoundingClientRect();
+        left = Math.max(left, c.left);
+        top = Math.max(top, c.top);
+        right = Math.min(right, c.right);
+        bottom = Math.min(bottom, c.bottom);
+      }
+      left = Math.max(left, 0);
+      top = Math.max(top, 0);
+      right = Math.min(right, vw);
+      bottom = Math.min(bottom, vh);
+      if (right - left < 1 || bottom - top < 1) {
+        return;
+      }
+      var L = Math.floor(left);
+      var T = Math.floor(top);
+      var W = Math.ceil(right) - L;
+      var H = Math.ceil(bottom) - T;
+      if (tg.bar) {
+        // Thin bar: exact width, the edge is smoothed like the box-shadow itself
+        L = left;
+        W = Math.round((right - left) * 100) / 100;
+      }
+      var overlaps = function (h) {
+        return h.x2 > L && h.x1 < L + W && h.y2 > T && h.y1 < T + H;
+      };
+      var holes = [];
+      if (!tg.panel) {
+        Array.prototype.forEach.call(tg.bar ? [] : tg.el.querySelectorAll(KEEP_INSIDE), function (el) {
+          var h = holeFor(el, el.tagName === 'MD-AUTOCOMPLETE');
+          if (h && overlaps(h)) {
+            holes.push(h);
+          }
+        });
+        floating.forEach(function (h) {
+          // Only what lies on top: comes later in the page and doesn't contain the element
+          if (h.el && (h.el === tg.el || h.el.contains(tg.el) ||
+              !(tg.el.compareDocumentPosition(h.el) & 4))) {
+            return;
+          }
+          if (overlaps(h)) {
+            holes.push(h);
+          }
+        });
+        if (pr) {
+          var ph = { x1: pr.left, y1: pr.top, x2: pr.right, y2: pr.bottom, round: false };
+          if (overlaps(ph)) {
+            holes.push(ph);
+          }
+        }
+      }
+      var dim = tg.panel ? 0 : dimFor(tg.el, backdrops);
+      var plan = tg.normal ? { layers: [{ mode: 'normal', color: rgbToHex(dimmed(hexToRgb(tg.hex), dim)) }] } :
+        exactPlan(tg.hex, dim);
+      var clipPath = holeClipPath(mergeHoles(holes), L, T, W, H);
+      var radius = layerRadius(tg, r);
+      plan.layers.forEach(function (pl) {
+        var d = layers[n] || newLayer();
+        n++;
+        var sig = [L, T, W, H, pl.color, pl.mode, radius, clipPath].join('|');
+        if (d.getAttribute('data-sgdm-sig') === sig && d.style.display === 'block') {
+          return;
+        }
+        d.setAttribute('data-sgdm-sig', sig);
+        var st = d.style;
+        st.display = 'block';
+        st.left = L + 'px';
+        st.top = T + 'px';
+        st.width = W + 'px';
+        st.height = H + 'px';
+        st.background = pl.color;
+        st.mixBlendMode = pl.mode;
+        st.borderRadius = radius;
+        st.webkitClipPath = clipPath;
+        st.clipPath = clipPath;
+      });
+    });
+    for (var i = n; i < layers.length; i++) {
+      if (layers[i].style.display !== 'none') {
+        layers[i].style.display = 'none';
+        layers[i].removeAttribute('data-sgdm-sig');
+      }
+    }
+  }
+
+  function scheduleLayers() {
+    if (layersQueued) {
+      return;
+    }
+    layersQueued = true;
+    window.requestAnimationFrame(function () {
+      layersQueued = false;
+      syncLayers();
+    });
+  }
+
+  // Follow the element every frame while SOGo animates (sidenav, dialogs, speed dial)
+  function followAnimation(ms) {
+    animUntil = Math.max(animUntil, Date.now() + ms);
+    if (animRunning) {
+      return;
+    }
+    animRunning = true;
+    var tick = function () {
+      syncLayers();
+      if (Date.now() < animUntil) {
+        window.requestAnimationFrame(tick);
+      } else {
+        animRunning = false;
+      }
+    };
+    window.requestAnimationFrame(tick);
+  }
+
+  function initLayers() {
+    if (!document.body) {
+      return;
+    }
+    if (window.MutationObserver) {
+      new MutationObserver(scheduleLayers).observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class']
+      });
+    }
+    document.addEventListener('scroll', scheduleLayers, true);
+    window.addEventListener('resize', scheduleLayers);
+    document.addEventListener('transitionrun', function () {
+      followAnimation(700);
+    }, true);
+    document.addEventListener('transitionend', function () {
+      followAnimation(100);
+    }, true);
+    document.addEventListener('animationstart', function () {
+      followAnimation(900);
+    }, true);
+    document.addEventListener('animationend', function () {
+      followAnimation(100);
+    }, true);
+    // Safety net for changes that fire no event
+    window.setInterval(syncLayers, 600);
+    syncLayers();
+  }
+
   function onKey(e) {
     if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyD') {
       e.preventDefault();
@@ -1604,6 +2271,7 @@
       applyPage();
       applyAllEditors();
       syncUi();
+      scheduleLayers();
     };
     if (darkQuery.addEventListener) {
       darkQuery.addEventListener('change', onScheme);
@@ -1619,6 +2287,7 @@
       applyPage();
       applyAllEditors();
       syncUi();
+      scheduleLayers();
     }
   });
 
@@ -1627,6 +2296,8 @@
     buildUi();
     buildHandles();
     syncUi();
+    applyPage();
+    initLayers();
   }
 
   if (document.readyState === 'loading') {
