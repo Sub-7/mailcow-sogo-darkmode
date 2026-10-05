@@ -4,6 +4,8 @@ A dark mode for the SOGo webmail in [mailcow-dockerized](https://github.com/mail
 
 It is a single, readable JavaScript file. It does not modify any mailcow or SOGo file and can be removed completely in a few commands.
 
+> **SOGo 6:** Alinto has confirmed that SOGo 6 will have a native dark mode. SOGo 6 comes with a completely new interface and is currently in alpha ([announcement](https://www.sogo.nu/news/2026/sogo-v6-public-release.html)). This project is for SOGo 5, which mailcow ships today, and bridges the gap until then. It won't work with SOGo 6, and it won't be needed there.
+
 | Before | After |
 |---|---|
 | ![SOGo without dark mode](screenshots/before.png) | ![SOGo with dark mode](screenshots/after.png) |
@@ -71,7 +73,7 @@ The dark mode button appears in the toolbar. This only affects the current tab u
 
 ## Requirements
 
-- mailcow-dockerized with SOGo. Tested with SOGo 5.12.
+- mailcow-dockerized with SOGo 5. Tested with SOGo 5.12. Not for SOGo 6, which has its own dark mode.
 - Commands below use `docker compose`. With the standalone version, use `docker-compose`.
 - Default mailcow path `/opt/mailcow-dockerized`. Adjust it if yours differs.
 
