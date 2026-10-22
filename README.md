@@ -314,6 +314,7 @@ The settings key in users' browsers (`sogoDarkModeSettings`) is harmless without
 
 ## Changelog
 
+- **1.4.1**: The bar above the message, contact and task lists in selection mode ("2 selected") and the search results bar now use the header color too ([#1](https://github.com/Sub-7/mailcow-sogo-darkmode/issues/1)). The sender field in the compose header is a lighter shade of the header color instead of SOGo's green. The animation after "Send" uses the accent color. On phones and small windows, colors no longer show through the message view when it covers the message list.
 - **1.4.0**: Colors you pick are now shown exactly in dark mode, at any darkness level: header, compose window header, accent color (selected item, round "new" buttons), color bar and background of unread messages, and the color swatches in the panel. Before, the color filter changed them (pure blue looked almost black). Menus, tooltips, messages and dialogs on top keep their own colors. Dialog backdrops now dim the page in dark mode instead of covering it with a light gray haze.
 - **1.3.1**: Header color now also applies to the compose window (normal and full size). The round "new" buttons (write message, new contact, new event) use the accent color. "Selected item" is now called "Accent color".
 - **1.3.0**: Color for the selected message/contact. By default it follows the header color.

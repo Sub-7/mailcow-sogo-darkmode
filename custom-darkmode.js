@@ -1,6 +1,6 @@
 /*
  * SOGo Dark Mode for mailcow-dockerized
- * Version 1.4.0 – exact colors in dark mode, header/accent color, layout, draggable borders, text size, unread highlighting
+ * Version 1.4.1 – exact colors in dark mode, header/accent color, layout, draggable borders, text size, unread highlighting
  * -----------------------------------------------------------------------------------------------
  * File:   data/conf/sogo/custom-darkmode.js
  * Mounted as js/theme.js into the SOGo container via docker-compose.override.yml.
@@ -31,7 +31,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '1.4.0';
+  var VERSION = '1.4.1';
   var PROJECT_URL = 'https://github.com/Sub-7/mailcow-sogo-darkmode';
 
   // ---------- Server-wide defaults ----------
@@ -705,13 +705,39 @@
     ].join('\n') + '\n}';
   }
 
-  // The headers: top left (name/email address), top right (toolbar) and the compose window
+  // The headers: top left (name/email address), top right (toolbar), the compose window, and
+  // the bars above the mail, contact and task lists that SOGo colors like the header:
+  // selection mode ("2 selected") and search results
   var HEADER_SELECTORS = [
     'md-sidenav > md-toolbar.md-tall',
     'md-toolbar.toolbar-main',
     'md-toolbar[data-sgdm-header]',
-    'md-dialog.sg-mail-editor md-toolbar'
+    'md-dialog.sg-mail-editor md-toolbar',
+    'md-toolbar.sg-toolbar-secondary.md-hue-1:not(.md-accent)',
+    'md-toolbar.advanced-search-clickable-toolbar'
   ];
+
+  // Sender field in the compose header: SOGo shows it in a lighter shade of its header color.
+  // With an own header color it gets a lighter (on light header colors: darker) shade of that one.
+  var SENDER_FIELD = 'md-dialog.sg-mail-editor md-toolbar md-autocomplete';
+
+  function senderFieldHex() {
+    var C = hexToRgb(settings.headerColor);
+    var light = luminance(C) > 0.4;
+    return rgbToHex(C.map(function (c) {
+      return light ? c * 0.88 : c * 0.8 + 0.2;
+    }));
+  }
+
+  // Background (CSS) and text color for an own color: exact in light mode, in dark mode the
+  // plain black or white that the color layers turn into the exact color (see exactPlan)
+  function colorPair(hex) {
+    if (filterActive()) {
+      var plan = exactPlan(hex);
+      return { bg: plan.bg, fg: plan.fg };
+    }
+    return { bg: hex, fg: luminance(hexToRgb(hex)) > 0.4 ? '#202020' : '#f5f5f5' };
+  }
 
   function headerCss() {
     if (!settings.headerColor) {
@@ -727,6 +753,7 @@
       bg = settings.headerColor;
       fg = luminance(hexToRgb(bg)) > 0.4 ? '#202020' : '#f5f5f5';
     }
+    var field = colorPair(senderFieldHex());
     var inner = [];
     HEADER_SELECTORS.forEach(function (sel) {
       inner.push(sel + ' md-icon:not(.sg-icon--badge)', sel + ' p', sel + ' .md-caption', sel + ' .md-button');
@@ -739,10 +766,17 @@
       inner.join(',\n') + ' {',
       '  color: ' + fg + ' !important;',
       '}',
-      // The sender field in the compose header keeps its own light background, so keep its text dark
-      'md-dialog.sg-mail-editor md-toolbar md-autocomplete,',
-      'md-dialog.sg-mail-editor md-toolbar md-autocomplete input {',
-      '  color: rgba(0, 0, 0, 0.87) !important;',
+      SENDER_FIELD + ' {',
+      '  background-color: ' + field.bg + ' !important;',
+      '  color: ' + field.fg + ' !important;',
+      '}',
+      [SENDER_FIELD + ' input', SENDER_FIELD + ' md-icon:not(.sg-icon--badge)', SENDER_FIELD + ' .md-button',
+        SENDER_FIELD + ' button'].join(',\n') + ' {',
+      '  color: ' + field.fg + ' !important;',
+      '}',
+      SENDER_FIELD + ' input::placeholder {',
+      '  color: ' + field.fg + ' !important;',
+      '  opacity: 0.7 !important;',
       '}'
     ].join('\n');
   }
@@ -854,6 +888,8 @@
   // color. Without either, SOGo's own colors stay.
   var SELECTED_ITEM = '.view-list md-list-item.md-accent.md-bg';
   var ACCENT_FAB = '.md-button.md-fab.md-accent';
+  // Animation after "Send" in the compose window (a circle that fills the window), not the red one on errors
+  var SEND_RIPPLE = 'md-dialog sg-ripple.md-accent:not(.md-warn)';
 
   function selectionColor() {
     return settings.selectColor || settings.headerColor || '';
@@ -879,7 +915,11 @@
       [SELECTED_ITEM + ' .sg-tile-content', SELECTED_ITEM + ' .sg-tile-content *:not(md-icon):not(.sg-category-dot)'].join(',\n') +
         ' {\n  color: ' + fg + ' !important;\n}',
       ACCENT_FAB + ' {\n  background-color: ' + bg + ' !important;\n  color: ' + fg + ' !important;\n}',
-      ACCENT_FAB + ' md-icon {\n  color: ' + fg + ' !important;\n}'
+      ACCENT_FAB + ' md-icon {\n  color: ' + fg + ' !important;\n}',
+      SEND_RIPPLE + ' {\n  background-color: ' + bg + ' !important;\n}',
+      [SEND_RIPPLE + ' ~ sg-ripple-content', SEND_RIPPLE + ' ~ sg-ripple-content *'].join(',\n') +
+        ' {\n  color: ' + fg + ' !important;\n}',
+      SEND_RIPPLE + ' ~ sg-ripple-content md-progress-circular path {\n  stroke: ' + fg + ' !important;\n}'
     ].join('\n');
   }
 
@@ -1806,13 +1846,14 @@
   // ---------- Exact colors in dark mode ----------
   // The page filter can't produce every color (pure blue comes out almost black). Everything
   // colored with a color from the panel therefore gets color layers outside the filter (see
-  // exactPlan): headers, the compose window header, the round "new" buttons, the selected item,
-  // color bar and background of unread messages, and the color swatches in the panel.
+  // exactPlan): headers, the compose window header and its sender field, the send animation,
+  // the round "new" buttons, the selected item, color bar and background of unread messages,
+  // and the color swatches in the panel.
   // The layers are plain elements without content, never take clicks and follow their element
   // on scrolling, resizing and animations. Cut out of each layer: everything lying on top of the
-  // element (menus, tooltips, messages, suggestion lists, dialogs, the settings panel) and the
-  // parts inside it that keep their own colors (pictures, tag dots, the sender field in the
-  // compose header). Under a dialog backdrop the layers are dimmed like the rest of the page.
+  // element (menus, tooltips, messages, suggestion lists, dialogs, the settings panel, SOGo areas
+  // covering it) and the parts inside it that keep their own colors (pictures, tag dots).
+  // Under a dialog backdrop the layers are dimmed like the rest of the page.
   var layers = [];
   var layersQueued = false;
   var animUntil = 0;
@@ -1830,11 +1871,13 @@
     '.md-datepicker-calendar-pane',
     'md-bottom-sheet',
     'md-dialog',
-    '.md-button.md-fab'
+    '.md-button.md-fab',
+    'sg-ripple'
   ].join(',');
 
-  // Parts inside a colored element that keep their own colors: profile pictures, tag dots,
-  // the sender field in the compose header (md-autocomplete, only if it has its own background)
+  // Parts inside a colored element that keep their own colors: profile pictures, tag dots, and
+  // the sender field in the compose header (md-autocomplete with its own background), which gets
+  // its own color layer
   var KEEP_INSIDE = 'sg-avatar-image img, .sg-category-dot, md-autocomplete';
 
   function newLayer() {
@@ -1857,7 +1900,38 @@
     return n >= Math.min(r.width, r.height) / 2 - 1;
   }
 
-  // Visible area of an element as a hole, or null
+  // Where an element can show: its box, cut by the ancestors that hide overflowing content
+  // (for example the compose window around the send animation)
+  function shownRect(el, r) {
+    var v = { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom };
+    var pos = window.getComputedStyle(el).position;
+    for (var p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+      if (pos === 'fixed') {
+        break;
+      }
+      var cs = window.getComputedStyle(p);
+      // An absolutely positioned element is only cut by its positioned ancestors
+      if (pos === 'absolute' && cs.position === 'static') {
+        continue;
+      }
+      if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+        var c = p.getBoundingClientRect();
+        if (cs.overflowX !== 'visible') {
+          v.x1 = Math.max(v.x1, c.left);
+          v.x2 = Math.min(v.x2, c.right);
+        }
+        if (cs.overflowY !== 'visible') {
+          v.y1 = Math.max(v.y1, c.top);
+          v.y2 = Math.min(v.y2, c.bottom);
+        }
+      }
+      pos = (cs.position === 'absolute' || cs.position === 'fixed') ? cs.position : 'static';
+    }
+    return v;
+  }
+
+  // Visible area of an element as a hole, or null. Round elements keep their circle (cx/cy/rad),
+  // x1..y2 is the part that shows.
   function holeFor(el, ownBackgroundOnly) {
     var r = el.getBoundingClientRect();
     if (r.width < 1 || r.height < 1) {
@@ -1870,7 +1944,17 @@
     if (ownBackgroundOnly && !parseCssColor(cs.backgroundColor)) {
       return null;
     }
-    return { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom, round: isRound(el, r) };
+    var v = shownRect(el, r);
+    if (v.x2 - v.x1 < 1 || v.y2 - v.y1 < 1) {
+      return null;
+    }
+    var h = { x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2, round: isRound(el, r) };
+    if (h.round) {
+      h.cx = r.left + r.width / 2;
+      h.cy = r.top + r.height / 2;
+      h.rad = Math.max(r.width, r.height) / 2 + 0.5;
+    }
+    return h;
   }
 
   // Dialogs, the image viewer and the slide-out folder pane dim the page with a backdrop.
@@ -1917,12 +2001,13 @@
     return Math.round((1 - keep) * 1000) / 1000;
   }
 
-  // Rounded corners of the layer: round buttons, the top corners of a dialog, the panel swatches
-  function layerRadius(tg, r) {
+  // Rounded corners of the layer: round buttons and the send animation, the top corners of a
+  // dialog, the panel swatches
+  function layerRadius(tg, r, round) {
     if (tg.bar) {
       return '0';
     }
-    if (tg.el.matches(ACCENT_FAB) || isRound(tg.el, r)) {
+    if (round) {
       return '50%';
     }
     var box = tg.panel ? tg.el.parentNode : tg.el.closest('md-dialog');
@@ -1978,9 +2063,16 @@
       Array.prototype.forEach.call(document.querySelectorAll(HEADER_SELECTORS.join(',')), function (el) {
         add(el, settings.headerColor, {});
       });
+      var fieldHex = senderFieldHex();
+      Array.prototype.forEach.call(document.querySelectorAll(SENDER_FIELD), function (el) {
+        add(el, fieldHex, {});
+      });
     }
     var accent = selectionColor();
     if (accent) {
+      Array.prototype.forEach.call(document.querySelectorAll(SEND_RIPPLE), function (el) {
+        add(el, accent, { clip: el.closest('md-dialog') });
+      });
       Array.prototype.forEach.call(document.querySelectorAll(ACCENT_FAB), function (el) {
         add(el, accent, {});
       });
@@ -2013,6 +2105,79 @@
     return out;
   }
 
+  // ----- Covered by SOGo itself? -----
+  // Some SOGo areas lie on top of others, for example the message view, which slides over the
+  // message list on small screens. The browser's hit test at a few points of an element tells
+  // what lies on top of it; transparent elements and backdrops don't count. The test runs at
+  // most every 250 ms per element, the rectangles of what it found follow every frame.
+  var OCCLUSION_MS = 250;
+  var occlusionCache = window.WeakMap ? new window.WeakMap() : null;
+
+  function paintsOpaque(el) {
+    if (/^(IMG|VIDEO|CANVAS|IFRAME|OBJECT|EMBED)$/.test(el.tagName)) {
+      return true;
+    }
+    var cs = window.getComputedStyle(el);
+    if (cs.visibility === 'hidden' || Number(cs.opacity) < 0.5) {
+      return false;
+    }
+    if (cs.backgroundImage && cs.backgroundImage !== 'none') {
+      return true;
+    }
+    var m = String(cs.backgroundColor).match(/rgba?\(([^)]*)\)/);
+    if (!m) {
+      return false;
+    }
+    var parts = m[1].split(/[\s,\/]+/).filter(Boolean);
+    return (parts.length > 3 ? Number(parts[3]) : 1) >= 0.5;
+  }
+
+  // Elements lying on top of the visible part (x1/y1/x2/y2) of a target
+  function occludersOf(tg, v) {
+    if (tg.panel || !occlusionCache || !document.elementsFromPoint) {
+      return [];
+    }
+    var kind = tg.bar ? 'bar' : 'area';
+    var now = Date.now();
+    var cached = occlusionCache.get(tg.el);
+    if (cached && cached[kind] && now - cached[kind].t < OCCLUSION_MS) {
+      return cached[kind].els;
+    }
+    var w = v.x2 - v.x1;
+    var h = v.y2 - v.y1;
+    var fx = (!tg.bar && w > 160) ? [0.08, 0.5, 0.92] : [0.5];
+    var fy = h > 90 ? [0.25, 0.75] : [0.5];
+    var els = [];
+    fx.forEach(function (a) {
+      fy.forEach(function (b) {
+        var hits = document.elementsFromPoint(v.x1 + w * a, v.y1 + h * b);
+        for (var i = 0; i < hits.length; i++) {
+          var el = hits[i];
+          // Reached the element itself (visible here) or only its ancestors are left
+          if (el === tg.el || tg.el.contains(el) || el.contains(tg.el)) {
+            return;
+          }
+          if (el.closest && el.closest('md-backdrop, .md-panel._md-panel-backdrop')) {
+            continue;
+          }
+          if (paintsOpaque(el)) {
+            if (els.indexOf(el) === -1) {
+              els.push(el);
+            }
+            return;
+          }
+        }
+      });
+    });
+    if (!cached) {
+      cached = {};
+      occlusionCache.set(tg.el, cached);
+    }
+    cached[kind] = { t: now, els: els };
+    return els;
+  }
+
+  // ----- Holes in a layer -----
   // Holes that overlap each other are merged, so that none of them fills the other again
   function mergeHoles(list) {
     var merged = true;
@@ -2037,35 +2202,85 @@
     return list;
   }
 
-  // clip-path of a layer (size W x H at L/T) with holes, "none" without holes
-  function holeClipPath(holes, L, T, W, H) {
-    if (!holes.length) {
+  // Cuts a polygon to a rectangle (Sutherland-Hodgman)
+  function clipToRect(pts, x1, y1, x2, y2) {
+    var inside = [
+      function (p) { return p[0] >= x1; },
+      function (p) { return p[0] <= x2; },
+      function (p) { return p[1] >= y1; },
+      function (p) { return p[1] <= y2; }
+    ];
+    var cut = [
+      function (a, b) { return [x1, a[1] + (x1 - a[0]) / (b[0] - a[0]) * (b[1] - a[1])]; },
+      function (a, b) { return [x2, a[1] + (x2 - a[0]) / (b[0] - a[0]) * (b[1] - a[1])]; },
+      function (a, b) { return [a[0] + (y1 - a[1]) / (b[1] - a[1]) * (b[0] - a[0]), y1]; },
+      function (a, b) { return [a[0] + (y2 - a[1]) / (b[1] - a[1]) * (b[0] - a[0]), y2]; }
+    ];
+    var out = pts;
+    for (var e = 0; e < 4 && out.length; e++) {
+      var input = out;
+      out = [];
+      for (var i = 0; i < input.length; i++) {
+        var cur = input[i];
+        var prev = input[(i + input.length - 1) % input.length];
+        if (inside[e](cur)) {
+          if (!inside[e](prev)) {
+            out.push(cut[e](prev, cur));
+          }
+          out.push(cur);
+        } else if (inside[e](prev)) {
+          out.push(cut[e](prev, cur));
+        }
+      }
+    }
+    return out;
+  }
+
+  // Polygon for a round hole, with enough corners to stay within half a pixel of the circle
+  function circlePoints(cx, cy, rad) {
+    var n = 24;
+    if (rad > 1) {
+      n = Math.min(240, Math.max(24, Math.ceil(Math.PI / Math.acos(Math.max(-1, 1 - 0.4 / rad)))));
+    }
+    var pts = [];
+    for (var k = 0; k < n; k++) {
+      var a = k / n * 2 * Math.PI;
+      pts.push([cx + rad * Math.cos(a), cy + rad * Math.sin(a)]);
+    }
+    return pts;
+  }
+
+  // clip-path of a layer of size W x H at L/T: only the visible part (vis, in page coordinates),
+  // without the holes. "none" if the whole layer shows.
+  function holeClipPath(holes, L, T, W, H, vis) {
+    var ox1 = Math.max(0, vis.x1 - L);
+    var oy1 = Math.max(0, vis.y1 - T);
+    var ox2 = Math.min(W, vis.x2 - L);
+    var oy2 = Math.min(H, vis.y2 - T);
+    var full = ox1 <= 0.5 && oy1 <= 0.5 && ox2 >= W - 0.5 && oy2 >= H - 0.5;
+    if (!holes.length && full) {
       return 'none';
     }
-    var px = function (x, y) {
-      return (Math.round(x * 10) / 10) + 'px ' + (Math.round(y * 10) / 10) + 'px';
+    var fmt = function (p) {
+      return (Math.round(p[0] * 10) / 10) + 'px ' + (Math.round(p[1] * 10) / 10) + 'px';
     };
-    var pts = ['0 0', W + 'px 0', W + 'px ' + H + 'px', '0 ' + H + 'px', '0 0'];
+    var start = [ox1, oy1];
+    var pts = [start, [ox2, oy1], [ox2, oy2], [ox1, oy2], start].map(fmt);
     holes.forEach(function (h) {
-      var x1 = h.x1 - L;
-      var y1 = h.y1 - T;
-      var x2 = h.x2 - L;
-      var y2 = h.y2 - T;
-      var ring = [];
+      var ring;
       if (h.round) {
-        var cx = (x1 + x2) / 2;
-        var cy = (y1 + y2) / 2;
-        var rad = Math.max(x2 - x1, y2 - y1) / 2 + 0.5;
-        for (var k = 0; k < 32; k++) {
-          var a = k / 32 * 2 * Math.PI;
-          ring.push(px(cx + rad * Math.cos(a), cy + rad * Math.sin(a)));
-        }
+        // Circle, cut to the part that shows
+        ring = clipToRect(circlePoints(h.cx - L, h.cy - T, h.rad), h.x1 - L, h.y1 - T, h.x2 - L, h.y2 - T);
       } else {
-        ring.push(px(x1, y1), px(x2, y1), px(x2, y2), px(x1, y2));
+        ring = [[h.x1 - L, h.y1 - T], [h.x2 - L, h.y1 - T], [h.x2 - L, h.y2 - T], [h.x1 - L, h.y2 - T]];
+      }
+      ring = clipToRect(ring, ox1, oy1, ox2, oy2);
+      if (ring.length < 3) {
+        return;
       }
       ring.push(ring[0]);
       // Way in and out on the same line: doesn't change the area
-      pts = pts.concat(ring, ['0 0']);
+      pts = pts.concat(ring.map(fmt), [fmt(start)]);
     });
     return 'polygon(evenodd, ' + pts.join(', ') + ')';
   }
@@ -2091,45 +2306,63 @@
       }
     }
     var pr = isPanelOpen() ? panel.getBoundingClientRect() : null;
-    var vw = window.innerWidth;
-    var vh = window.innerHeight;
+    // Layout viewport (on phones the visual viewport can be smaller while zoomed in)
+    var vw = document.documentElement.clientWidth || window.innerWidth;
+    var vh = document.documentElement.clientHeight || window.innerHeight;
     var n = 0;
     targets.forEach(function (tg) {
       var r = tg.el.getBoundingClientRect();
-      var left = r.left;
-      var top = r.top;
-      var right = r.right;
-      var bottom = r.bottom;
+      if (r.width < 1 || r.height < 1) {
+        return;
+      }
+      var round = !tg.bar && !tg.panel &&
+        (tg.el.matches(ACCENT_FAB) || tg.el.tagName === 'SG-RIPPLE' || isRound(tg.el, r));
+      // Visible part
+      var vis = { x1: r.left, y1: r.top, x2: r.right, y2: r.bottom };
       if (tg.bar) {
         // 4px (times the text size zoom) at the left edge, like the box-shadow in unreadCss
         var z = tg.el.currentCSSZoom || (tg.el.offsetWidth ? r.width / tg.el.offsetWidth : 1) || 1;
-        right = Math.min(right, left + 4 * z);
+        vis.x2 = Math.min(vis.x2, vis.x1 + 4 * z);
       }
       if (tg.clip) {
         var c = tg.clip.getBoundingClientRect();
-        left = Math.max(left, c.left);
-        top = Math.max(top, c.top);
-        right = Math.min(right, c.right);
-        bottom = Math.min(bottom, c.bottom);
+        vis.x1 = Math.max(vis.x1, c.left);
+        vis.y1 = Math.max(vis.y1, c.top);
+        vis.x2 = Math.min(vis.x2, c.right);
+        vis.y2 = Math.min(vis.y2, c.bottom);
       }
-      left = Math.max(left, 0);
-      top = Math.max(top, 0);
-      right = Math.min(right, vw);
-      bottom = Math.min(bottom, vh);
-      if (right - left < 1 || bottom - top < 1) {
+      vis.x1 = Math.max(vis.x1, 0);
+      vis.y1 = Math.max(vis.y1, 0);
+      vis.x2 = Math.min(vis.x2, vw);
+      vis.y2 = Math.min(vis.y2, vh);
+      if (vis.x2 - vis.x1 < 1 || vis.y2 - vis.y1 < 1) {
         return;
       }
-      var L = Math.floor(left);
-      var T = Math.floor(top);
-      var W = Math.ceil(right) - L;
-      var H = Math.ceil(bottom) - T;
-      if (tg.bar) {
+      // Layer box: round elements keep their full circle (rounded corners do the shape, the
+      // clip-path the visible part), everything else only covers its visible part
+      var L;
+      var T;
+      var W;
+      var H;
+      if (round) {
+        L = Math.round(r.left * 100) / 100;
+        T = Math.round(r.top * 100) / 100;
+        W = Math.round(r.width * 100) / 100;
+        H = Math.round(r.height * 100) / 100;
+      } else if (tg.bar) {
         // Thin bar: exact width, the edge is smoothed like the box-shadow itself
-        L = left;
-        W = Math.round((right - left) * 100) / 100;
+        L = vis.x1;
+        T = Math.floor(vis.y1);
+        W = Math.round((vis.x2 - vis.x1) * 100) / 100;
+        H = Math.ceil(vis.y2) - T;
+      } else {
+        L = Math.floor(vis.x1);
+        T = Math.floor(vis.y1);
+        W = Math.ceil(vis.x2) - L;
+        H = Math.ceil(vis.y2) - T;
       }
       var overlaps = function (h) {
-        return h.x2 > L && h.x1 < L + W && h.y2 > T && h.y1 < T + H;
+        return h.x2 > vis.x1 && h.x1 < vis.x2 && h.y2 > vis.y1 && h.y1 < vis.y2;
       };
       var holes = [];
       if (!tg.panel) {
@@ -2149,6 +2382,12 @@
             holes.push(h);
           }
         });
+        occludersOf(tg, vis).forEach(function (el) {
+          var h = holeFor(el, false);
+          if (h && overlaps(h)) {
+            holes.push(h);
+          }
+        });
         if (pr) {
           var ph = { x1: pr.left, y1: pr.top, x2: pr.right, y2: pr.bottom, round: false };
           if (overlaps(ph)) {
@@ -2156,11 +2395,19 @@
           }
         }
       }
+      holes = mergeHoles(holes);
+      // Completely covered: no layer at all
+      for (var hi = 0; hi < holes.length; hi++) {
+        var hh = holes[hi];
+        if (!hh.round && hh.x1 <= vis.x1 && hh.y1 <= vis.y1 && hh.x2 >= vis.x2 && hh.y2 >= vis.y2) {
+          return;
+        }
+      }
       var dim = tg.panel ? 0 : dimFor(tg.el, backdrops);
       var plan = tg.normal ? { layers: [{ mode: 'normal', color: rgbToHex(dimmed(hexToRgb(tg.hex), dim)) }] } :
         exactPlan(tg.hex, dim);
-      var clipPath = holeClipPath(mergeHoles(holes), L, T, W, H);
-      var radius = layerRadius(tg, r);
+      var clipPath = holeClipPath(holes, L, T, W, H, vis);
+      var radius = layerRadius(tg, r, round);
       plan.layers.forEach(function (pl) {
         var d = layers[n] || newLayer();
         n++;
